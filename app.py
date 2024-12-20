@@ -1,4 +1,4 @@
-import gradio as gr
+# import gradio as gr
 from modelscope.pipelines import pipeline
 from modelscope.utils.constant import Tasks
 from modelscope.outputs import OutputKeys
@@ -10,68 +10,80 @@ from util import *
 from detect_recognize import detector, recognizer
 import sys
 from PySide6.QtWidgets import QApplication, QMainWindow, QInputDialog, QMessageBox, QVBoxLayout, QPushButton, QDialog, QTextEdit
-from PySide6.QtWidgets import QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView
-from PySide6.QtGui import QIcon, QPixmap, QPainter
+from PySide6.QtWidgets import QButtonGroup, QGraphicsScene, QGraphicsPixmapItem, QFileDialog, QLabel, QTableWidgetItem, QHeaderView
+from PySide6.QtGui import QIcon, QPixmap, QImage
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWebEngineWidgets import QWebEngineView
 # 导入我们生成的界面
 from ui.main_ui import Ui_Dialog
 import copy
-
+import cv2
+from emotion import get_emotion, eyeclosed
 facebank_path = 'images/MSE-p/个人'
 facetest_path = 'images/MSE-p/f5dff87ed6c3d3dcf1ed44ae36aa83e.jpg'
-face_detector = pipeline(Tasks.face_detection, model='gaosheng/face_detect')
+face_detector = pipeline(Tasks.face_detection, model='gaosheng/face_detect') #人脸检测
 # face_recognizer = pipeline(Tasks.face_recognition, model='damo/cv_ir101_facerecognition_cfglint')
-face_recognizer = pipeline(Tasks.face_recognition, model='iic/cv_ir101_facerecognition_cfglint')
+face_recognizer = pipeline(Tasks.face_recognition, model='iic/cv_ir101_facerecognition_cfglint') #人脸识别
+portrait_matting = pipeline(Tasks.portrait_matting, model='damo/cv_unet_image-matting') #人脸抠图
+face_2d_keypoints_model = pipeline(Tasks.face_2d_keypoints, model='damo/cv_mobilenet_face-2d-keypoints_alignment') #闭眼检测
+emotion_model = pipeline(Tasks.facial_expression_recognition, 'damo/cv_vgg19_facial-expression-recognition_fer') #表情识别
 face_bank = load_face_bank(facebank_path, face_recognizer)
 
-def inference(img: Image, draw_detect_enabled, detect_threshold, sim_threshold) -> json:
-    boxes = detect(img, face_detector, draw_detect_enabled, detect_threshold)
-    # img = resize_img(img)
-    # img = img.convert('RGB') 
-    # detection_result = face_detector(img)
+#查找人名并搜索头像
+def get_enlarged_face_img(image, box, scale=3):
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    # 计算新的边界框坐标
+    x0 = max(box[0] - (scale - 1.6) * w // 2, 0)
+    y0 = max(box[1] - (scale - 1.2) * h // 2, 0)
+    x1 = min(box[2] + (scale - 1.6) * w // 2, image.width)
+    y1 = min(box[3] + (scale - 1.2) * h // 2, image.height)
 
-    # boxes = np.array(detection_result[OutputKeys.BOXES])
-    # scores = np.array(detection_result[OutputKeys.SCORES])
-    
-    faces = []
-    for i in range(len(boxes)):
-        box = boxes[i][:4]
-        face_embedding = get_face_embedding(img, box, face_recognizer)
-        name, sim = get_name_sim(face_embedding, face_bank)
-        if name is None:
-            continue
-        if sim < sim_threshold:
-            faces.append({'box': box, 'name': '未知', 'sim': sim})
-        else:
-            faces.append({'box': box, 'name': name, 'sim': sim})
-    rows = get_rows(faces)
-    row_names = get_row_names(faces, rows)
-    draw_name(img, row_names)
-    if draw_detect_enabled:
-        draw_faces(img, faces)
-    img.save('result.jpg')
-    return img, get_row_names_text(row_names)
+    return image.crop((x0, y0, x1, y1))
 
-    # for i in range(len(boxes)):
-    #     score = scores[i]
-    #     if score < detect_threshold:
-    #         continue
-    #     box = boxes[i]
-    #     face_embedding = get_face_embedding(img, box, face_recognizer)
-    #     name, sim = get_name_sim(face_embedding, face_bank)
-    #     if name is None:
-    #         continue
-    #     if sim < sim_threshold:
-    #         faces.append({'box': box, 'name': '未知', 'sim': sim})
-    #     else:
-    #         faces.append({'box': box, 'name': name, 'sim': sim})
-    # rows = get_rows(faces)
-    # row_names = get_row_names(faces, rows)
-    # draw_name(img, row_names)
-    # if draw_detect_enabled:
-    #     draw_faces(img, faces)
-    # return img, get_row_names_text(row_names)
+class ImageDialog(QDialog):
+    def __init__(self, image, file_name='segmented_image.png', parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Display Image")
+        self.file_name = file_name  # Default file name for saving
+        # Layout
+        layout = QVBoxLayout()
+        self.image = image
+        
+        # Label to display image
+        self.image_label = QLabel(self)
+        
+        # Convert OpenCV image (BGR) to QImage (RGB)
+        height, width, channels = image.shape
+        bytes_per_line = channels * width
+        q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGBA8888)
+        pixmap = QPixmap.fromImage(q_image)
+
+        # Set pixmap to the label
+        self.image_label.setPixmap(pixmap)
+        self.image_label.setAlignment(Qt.AlignCenter)
+        
+        # Add label to layout
+        layout.addWidget(self.image_label)
+        
+        # Save Button
+        self.save_button = QPushButton("Save Image", self)
+        self.save_button.clicked.connect(self.save_image)
+        layout.addWidget(self.save_button)
+        
+        self.setLayout(layout)
+
+    def save_image(self):
+        # Open file dialog to choose location to save
+        file_name, _ = QFileDialog.getSaveFileName(self, "Save Image", self.file_name, "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)")
+        if file_name:
+            # Save the image to the specified file path
+            # Convert to PIL Image
+            pil_image = Image.fromarray(self.image).convert("RGBA")
+            # Save the image using Pillow
+            pil_image.save(file_name)
+            # cv2.imwrite(file_name, cv2.cvtColor(self.image, cv2.COLOR_RGBA2BGRA))  # Convert back to BGR for saving
+            print(f"Image saved to {file_name}")
 
 class Detect_Worker(QThread):
     progress = Signal(int)  # 自定义信号，用于更新进度条
@@ -91,6 +103,38 @@ class Detect_Worker(QThread):
         # 任务完成后发射信号
         self.finished.emit()
 
+class Emotion_Worker(QThread):
+    progress = Signal(int)  # 自定义信号，用于更新进度条
+    finished = Signal()  # 自定义信号，用于通知线程完成
+
+    def __init__(self, recognizer, eye_ratio):
+        super().__init__()
+        self.recognizer = recognizer  # 保存传入的参数
+        self.eye_ratio = eye_ratio  # 保存传入的参数
+
+    def run(self):
+        for idx, item in enumerate(self.recognizer.faces):
+            face_img = item['face_img']
+            emotion = get_emotion(face_img, emotion_model)
+            eye_rate = eyeclosed(face_img, face_2d_keypoints_model)
+            emotion_flag = 0
+            eye_flag = 0
+            if emotion in ['Angry', 'Disgust', 'Fear', 'Sad']:# 判定为不开心的情绪种类
+                emotion_flag = 1
+            if eye_rate < self.eye_ratio:
+                eye_flag = 1
+            if emotion_flag == 0 and eye_flag == 0:
+                self.recognizer.faces[idx].update({'emotion_state':'open_happy'})
+            if emotion_flag == 0 and eye_flag == 1:
+                self.recognizer.faces[idx].update({'emotion_state':'close_happy'})
+            if emotion_flag == 1 and eye_flag == 0:
+                self.recognizer.faces[idx].update({'emotion_state':'open_unhappy'})
+            if emotion_flag == 1 and eye_flag == 1:
+                self.recognizer.faces[idx].update({'emotion_state':'close_unhappy'})
+            self.progress.emit((idx)/len(self.recognizer.faces)*100)  # 发射进度信号
+        # 任务完成后发射信号
+        self.finished.emit()
+
 # 继承QWidget类，以获取其属性和方法
 class MyWidget(QMainWindow):
     def __init__(self):
@@ -100,6 +144,7 @@ class MyWidget(QMainWindow):
         self.ui.setupUi(self)
         self.file_process_finished = False
         self.image_order_path = 'images/result.jpg'
+        self.image_emotion_path = 'images/emotion.jpg'
 
         self.scene = QGraphicsScene(self)
         self.ui.graphicsView.setScene(self.scene)
@@ -115,12 +160,33 @@ class MyWidget(QMainWindow):
 
         self.ui.user_info.setReadOnly(True)
         self.ui.file_button.clicked.connect(self.read_file_dialog)
-        self.ui.checkBox.setChecked(True)
-        self.ui.checkBox.stateChanged.connect(self.checkbox_changed)
+        # 将按钮添加到按钮组
+        self.button_group = QButtonGroup(self)
+        self.button_group.addButton(self.ui.radioButton_ori)
+        self.button_group.addButton(self.ui.radioButton_order)
+        self.button_group.addButton(self.ui.radioButton_emotion)
+        # 设置默认选项
+        self.ui.radioButton_ori.setChecked(True)
+        # 连接按钮的点击事件
+        self.ui.radioButton_ori.toggled.connect(self.show_ori)
+        self.ui.radioButton_order.toggled.connect(self.show_order)
+        self.ui.radioButton_emotion.toggled.connect(self.show_emotion)
+
         self.ui.order_button.clicked.connect(self.order)
         self.ui.emotion_button.clicked.connect(self.emotion)
+        self.emoji_dict = {
+            "open_happy": Image.open("assets/emotion/open_happy.png"),
+            "close_happy": Image.open("assets/emotion/close_happy.png"),
+            "open_unhappy": Image.open("assets/emotion/open_unhappy.png"),
+            "close_unhappy": Image.open("assets/emotion/close_unhappy.png"),
+            'mask': Image.open("assets/emotion/mask.png") #mask emoji区域
+        }
+        self.image = None
+        self.image_result = None
+        self.image_emotion = None
         # 存储原始缩放级别
         self.originalScale = 1.0
+        self.eye_ratio = 0.1
 
     def graphicsView_wheelEvent(self, event):
         # 获取滚轮的滚动量
@@ -156,7 +222,17 @@ class MyWidget(QMainWindow):
             
             # 将视口坐标转换为场景坐标
             scenePos = self.ui.graphicsView.mapToScene(viewPos)
-            
+            for item in self.recognizer.faces:
+                box = item['box']
+                x0, y0, x1, y1 = box
+                if x0 <= scenePos.x() <= x1 and y0 <= scenePos.y() <= y1:
+                    face_segment = self.extract_faces(self.image, box)
+                    self.show_image_dialog(face_segment, item['name'])
+                    # 使用场景坐标进行后续处理
+                    print(f"Scene coordinates: {scenePos.x()}, {scenePos.y()}")
+                    break
+            else: # 如果没有找到匹配的框，则重置视图
+                self.resetViewScale()
             # 使用场景坐标进行后续处理
             print(f"Scene coordinates: {scenePos.x()}, {scenePos.y()}")
 
@@ -166,12 +242,20 @@ class MyWidget(QMainWindow):
             print("Right mouse button clicked")
         # 可以根据需要添加更多的事件处理
 
-    def checkbox_changed(self):
-        if self.ui.checkBox.isChecked():
-            self.load_image(self.image_order_path)
-        else:
-            self.load_image(self.image_path)
+    def show_image_dialog(self, image, name):
+        dialog = ImageDialog(image, name, self)
+        dialog.exec()
 
+    def show_ori(self):
+        if self.image is not None:
+            self.load_image(self.image)
+    def show_order(self):
+        if self.image_result is not None:
+            self.load_image(self.image_result)
+    def show_emotion(self):
+        if self.image_emotion is not None:
+            self.load_image(self.image_emotion)
+    
     def search(self):
         # 获取输入框中的文本
         name = self.ui.user_name.text()
@@ -188,14 +272,17 @@ class MyWidget(QMainWindow):
     def read_file_dialog(self):
         # 打开文件对话框，让用户选择文件
         file_path, _ = QFileDialog.getOpenFileName(self, "Open File", "", "Image Files (*.png *.jpg *.jpeg)")
-
+        self.image = None
+        self.image_result = None
+        self.image_emotion = None
+        self.emotion_process_finished = False
         # 如果用户选择了文件，则显示文件路径
         if file_path:
             self.detector = detector(face_detector, 0.5)
             self.recognizer = recognizer(face_recognizer, face_bank, 0.3)
             self.image_path = file_path
             self.image = Image.open(file_path)
-            self.load_image(file_path)
+            self.load_image(self.image)
             self.image_result = copy.deepcopy(self.image)
 
             self.set_ui_disabled(True)
@@ -209,15 +296,17 @@ class MyWidget(QMainWindow):
             self.file_process_finished = False
             self.worker.start()
     
-    def load_image(self, image_path):
+    def load_image(self, pil_image):
         # Clear previous scene
         self.scene.clear()
 
         # Reset the transformation of the view to ensure it starts from the original state
         self.ui.graphicsView.resetTransform()  # Reset transformations (zoom, pan)
 
+        qimage = QImage(pil_image.tobytes(), pil_image.width, pil_image.height, pil_image.width * 3, QImage.Format_RGB888)
         # Load image
-        pixmap = QPixmap(image_path)
+        # pixmap = QPixmap(image_path)
+        pixmap = QPixmap(qimage)
         
         # Check if image is loaded successfully
         if pixmap.isNull():
@@ -254,9 +343,9 @@ class MyWidget(QMainWindow):
         self.row_name = row_names
         # draw_name(self.image_result, row_names)
         draw_faces(self.image_result, self.recognizer.faces)
-        self.image_result.save(self.image_order_path)
-        if self.ui.checkBox.isChecked():
-            self.load_image(self.image_order_path)
+        # self.image_result.save(self.image_order_path)
+        if self.ui.radioButton_order.isChecked():
+            self.load_image(self.image_result)
         self.update_progress(100)
 
         self.set_ui_disabled(False)  # 重新启用控件
@@ -267,16 +356,27 @@ class MyWidget(QMainWindow):
         """禁用或启用界面控件"""
         # 禁用或启用整个窗口中的控件
         self.setDisabled(disable)
-        self.ui.checkBox.setDisabled(disable)  # 禁用开始按钮
+        # self.button_group.setDisabled(disable)  # 禁用开始按钮
         self.ui.file_button.setDisabled(disable)  # 禁用进度条
         self.ui.order_button.setDisabled(disable)  # 禁用状态标签
         self.ui.emotion_button.setDisabled(disable)  # 禁用状态标签
         self.ui.user_name.setDisabled(disable)  # 禁用状态标签
     
     def order(self):
+        title_name = "排号信息"
+        if self.row_name is None:
+            return
+        # 构造显示文本
+        message_text = ""  # 初始化消息文本
+        for index, row in enumerate(self.row_name, start=1):
+            row_text = f"第{len(self.row_name) - index + 1}排: " + " ".join(row)  # 将该排的人名用空格连接起来
+            message_text += row_text + "\n"  # 添加到最终的消息文本
+        self.show_text(title_name, message_text)
+
+    def show_text(self, title_name, message_text):
         # 创建自定义的对话框
         dialog = QDialog(self)
-        dialog.setWindowTitle("排号信息")
+        dialog.setWindowTitle(title_name)
         dialog.setGeometry(150, 150, 400, 300)
         dialog.resize(800, 300)  # 设置大小为 400x300 像素
 
@@ -285,14 +385,6 @@ class MyWidget(QMainWindow):
         text_edit.setReadOnly(True)  # 设置为只读
         layout = QVBoxLayout(dialog)
         layout.addWidget(text_edit)
-
-        if self.row_name is None:
-            return
-        # 构造显示文本
-        message_text = ""  # 初始化消息文本
-        for index, row in enumerate(self.row_name, start=1):
-            row_text = f"第{len(self.row_name) - index + 1}排: " + " ".join(row)  # 将该排的人名用空格连接起来
-            message_text += row_text + "\n"  # 添加到最终的消息文本
 
         # 设置文本框的内容
         text_edit.setText(message_text)
@@ -306,14 +398,69 @@ class MyWidget(QMainWindow):
         msg.setIcon(QMessageBox.Information)
         msg.setText("这是一个弹出框显示的信息。")
     
+    def extract_faces(self, img: Image, box) -> list:
+        img = img.convert('RGB')
+        #根据yolo检测人脸box扩大截图范围
+        enlarged_face_img = get_enlarged_face_img(img, box, scale=3)
+        #调用魔搭BSHM人像抠图
+        img_output = portrait_matting(enlarged_face_img)
+        result = img_output[OutputKeys.OUTPUT_IMG]
+        #faces.append(result)
+        #cv2图像通道BGR调整为RGB
+        b, g, r, a = cv2.split(result)
+        image_1 = cv2.merge([r, g, b, a])
+
+        return image_1
+
     def emotion(self):
-        # 获取输入框中的文本
-        name = self.ui.user_name.text()
+        if self.image_emotion is None:
+            self.image_emotion = copy.deepcopy(self.image)
+            #获取表情和闭眼状态
+            self.set_ui_disabled(True)  # 禁用控件
+            self.emotion_worker = Emotion_Worker(self.recognizer, self.eye_ratio)
+            self.emotion_worker.progress.connect(self.update_progress)  # 连接信号到槽函数
+            self.emotion_worker.finished.connect(self.emotion_thread_finished)  # 连接线程完成信号
+            self.emotion_process_finished = False
+            self.emotion_worker.start()
+        else:
+            self.show_emotion_info()
+            
+    def emotion_thread_finished(self):
+        if self.emotion_process_finished:
+            return
+        self.image_emotion = draw_faces_emoji(self.image_emotion, self.recognizer.faces, self.emoji_dict)
+        # self.image_emotion.save(self.image_emotion_path)
+        if self.ui.radioButton_emotion.isChecked():
+            self.load_image(self.image_emotion)
+        self.set_ui_disabled(False)  # 重新启用控件
+        # QApplication.restoreOverrideCursor()  # 恢复光标
+        self.update_progress(100)
+        self.emotion_process_finished = True
+        self.emotion_worker.quit()
+        self.show_emotion_info()
 
-        # 在文本框中显示搜索结果
-        self.ui.user_info.setText(f"Searching for {name}...")
+    def show_emotion_info(self):
+        unhappy_count = 0
+        close_count = 0
+        # 构造显示文本
+        message_text = "表情严肃: \n"  # 初始化消息文本
 
-    
+        for face in self.recognizer.faces:
+            if 'unhappy' in face['emotion_state']:
+                row_text = f"{face['name']} 严肃\n"
+                message_text += row_text
+                unhappy_count += 1
+        
+        message_text += "\n表情闭眼: \n"  # 初始化消息文本
+
+        for face in self.recognizer.faces:
+            if 'close' in face['emotion_state']:
+                row_text = f"{face['name']} 闭眼\n"
+                message_text += row_text
+                close_count += 1
+
+        message_text += f"\n表情严肃{unhappy_count}人，表情闭眼{close_count}人\n"  # 初始化消息文本
+        self.show_text("表情识别结果", message_text)
 # 程序入口
 if __name__ == "__main__":
     # 初始化QApplication，界面展示要包含在QApplication初始化之后，结束之前

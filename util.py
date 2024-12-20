@@ -51,12 +51,29 @@ def get_face_img(image, box):
         y1 = image.height - 1
     return image.crop((x0, y0, x1, y1))
 
+def get_face_img_box(image, box):
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    x0 = box[0]
+    if x0 < 0:
+        x0 = 1
+    y0 = box[1]
+    if y0 < 0:
+        y0 = 1
+    x1 = box[2]
+    if x1 > image.width:
+        x1 = image.width - 1
+    y1 = box[3]
+    if y1 > image.height:
+        y1 = image.height - 1
+    return image.crop((x0, y0, x1, y1))
+
 def get_face_embedding(image, box, face_recognizer):
     face_img = get_face_img(image, box)
     embeddings = face_recognizer(face_img)['img_embedding']
     if len(embeddings) == 0:
         return None
-    return embeddings[0]
+    return embeddings[0], face_img
 
 def get_name_sim(face_embedding, face_bank):
     name = ''
@@ -96,6 +113,46 @@ def draw_faces(image, faces):
     draw = ImageDraw.Draw(image)
     for face in faces:
         draw_face(draw, face, font)
+
+def draw_face_emoji(img_draw, face, emoji_dict):
+    box = face['box']
+    w, h = box[2] - box[0], box[3] - box[1]
+    x, y = box[0], box[1]
+    w, h, x, y = int(w), int(h), int(x), int(y)
+    resize_len = max(w, h)
+    emoji_img = emoji_dict[face['emotion_state']]
+    mask_img = emoji_dict['mask']
+    # Resize emoji to fit inside the face box
+    x += (w - resize_len) // 2
+    if x < 0:
+        x = 0
+    y += (h - resize_len) // 2
+    if y < 0:
+        y = 0
+    emoji_resized = emoji_img.resize((resize_len, resize_len))
+    mask_resized = mask_img.resize((resize_len, resize_len)).convert('L')
+
+    # Convert the emoji image to a numpy array
+    emoji_np = np.array(emoji_resized)
+    mask_np = np.array(mask_resized)
+
+    # Check if the emoji has an alpha channel (transparency)
+    if emoji_np.shape[2] == 3:
+        # Split the emoji channels
+        emoji_bgr = emoji_np[:, :, :3]  # BGR channels (ignoring alpha)
+        
+        # Place the emoji on the face region in the frame
+        for c in range(3):
+            img_draw[y:y+resize_len, x:x+resize_len, c][mask_np < 10] = emoji_bgr[:, :, c][mask_np < 10]
+    return img_draw
+
+
+def draw_faces_emoji(image, faces, emoji_dict):
+    draw = np.array(image)
+    for face in faces:
+        draw = draw_face_emoji(draw, face, emoji_dict)
+    image = Image.fromarray(draw)
+    return image
 
 def get_rownum(data, mean_h, result):
     # 使用y坐标作为距离度量值

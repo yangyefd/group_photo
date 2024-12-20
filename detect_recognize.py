@@ -203,14 +203,15 @@ class recognizer():
         
         for i in range(len(boxes)):
             box = boxes[i][:4]
-            face_embedding = get_face_embedding(img, box, self.face_recognizer)
+            face_embedding, face_img = get_face_embedding(img, box, self.face_recognizer)
             name, sim = get_name_sim(face_embedding, self.face_bank)
             if name is None:
                 continue
+            # face_img = get_face_img_box(img, box)
             if sim < self.sim_threshold:
-                self.faces.append({'box': box, 'name': '未知', 'sim': sim})
+                self.faces.append({'box': box, 'name': '未知', 'sim': sim, 'face_img':face_img})
             else:
-                self.faces.append({'box': box, 'name': name, 'sim': sim})
+                self.faces.append({'box': box, 'name': name, 'sim': sim, 'face_img':face_img})
 
 # def detect(img_big, face_detector, draw_detect_enabled, detect_threshold):
 #     img_big_np = np.array(img_big)
