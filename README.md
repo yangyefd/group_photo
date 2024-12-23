@@ -60,6 +60,12 @@ license: Apache License 2.0
 4. 鼠标滚轮可以对图片进行放大和缩小，鼠标右键可以还原原图视角
 5. 鼠标左键单击任意一张人脸框，可以进行人像分割
 6. 点击表情可以进行表情识别和闭眼检测
+
+## 贡献
+1. 本项目基于赵卫东老师的集体照代码，感谢赵卫东老师开源的代码
+2. 本项目人像分割部分代码由潘缘进行提供
+3. 本项目表情识别和闭眼检测部分由余生龙提供
+   
 ## QA
 Q:cannot import name ‘OfflineModeIsEnabled‘ from ‘datasets.utils.file_utils‘
 A:pip install datasets==2.16.0
