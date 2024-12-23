@@ -19,8 +19,7 @@ from ui.main_ui import Ui_Dialog
 import copy
 import cv2
 from emotion import get_emotion, eyeclosed
-facebank_path = 'images/MSE-p/个人'
-facetest_path = 'images/MSE-p/f5dff87ed6c3d3dcf1ed44ae36aa83e.jpg'
+facebank_path = 'images/facebank'
 face_detector = pipeline(Tasks.face_detection, model='gaosheng/face_detect') #人脸检测
 # face_recognizer = pipeline(Tasks.face_recognition, model='damo/cv_ir101_facerecognition_cfglint')
 face_recognizer = pipeline(Tasks.face_recognition, model='iic/cv_ir101_facerecognition_cfglint') #人脸识别
@@ -265,7 +264,15 @@ class MyWidget(QMainWindow):
             for col_num, name_i in enumerate(row, start=1):
                 if name in name_i:
                     self.ui.user_info.setText(f"{name} is in row {row_num}, column {col_num}")
-                    return
+                    for item in self.recognizer.faces:
+                        if item['name'] == name_i:
+                            box = item['box']
+                            face_segment = self.extract_faces(self.image, box)
+                            self.show_image_dialog(face_segment, name_i)
+                            return
+                    # face_segment = self.extract_faces(self.image, box)
+                    # self.show_image_dialog(face_segment, item['name'])
+                    # return
 
         self.ui.user_info.setText(f"{name} not found")
     
@@ -424,7 +431,7 @@ class MyWidget(QMainWindow):
             self.emotion_worker.start()
         else:
             self.show_emotion_info()
-            
+
     def emotion_thread_finished(self):
         if self.emotion_process_finished:
             return
