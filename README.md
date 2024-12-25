@@ -5,8 +5,9 @@ license: Apache License 2.0
 ```bash
  git clone https://www.modelscope.cn/studios/sihan733/group_photo.git
 ```
-![alt text](assets/demo_ui.png)
+
 ## 本项目基于赵卫东老师的集体照代码
+![alt text](assets/demo_ui.png)
 1. 使用pyside6替换gradio提供更加友好的UI
 2. 支持交互友好的抠图
 3. 人脸检测
