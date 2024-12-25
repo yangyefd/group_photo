@@ -64,7 +64,7 @@ license: Apache License 2.0
 ## 贡献
 1. 本项目基于赵卫东老师的集体照代码，感谢赵卫东老师开源的代码
 2. 本项目人像分割部分代码由潘缘进行提供
-3. 本项目表情识别和闭眼检测部分由余生龙提供
+3. 本项目表情识别和闭眼检测部分由余盛龙提供
    
 ## QA
 Q:cannot import name ‘OfflineModeIsEnabled‘ from ‘datasets.utils.file_utils‘
