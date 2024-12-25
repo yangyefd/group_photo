@@ -45,22 +45,24 @@ class ImageDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Display Image")
         self.file_name = file_name  # Default file name for saving
+        self.image = image
+        
         # Layout
         layout = QVBoxLayout()
-        self.image = image
         
         # Label to display image
         self.image_label = QLabel(self)
-        
-        # Convert OpenCV image (BGR) to QImage (RGB)
-        height, width, channels = image.shape
-        bytes_per_line = channels * width
-        q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGBA8888)
-        pixmap = QPixmap.fromImage(q_image)
-
-        # Set pixmap to the label
-        self.image_label.setPixmap(pixmap)
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("border: 1px solid black;")  # Optional: Add a border for clarity
+
+        # Limit the QLabel size to prevent it from exceeding screen bounds
+        screen_geometry = self.screen().availableGeometry()
+        max_width = screen_geometry.width() * 0.4  # 80% of screen width
+        max_height = screen_geometry.height() * 0.4  # 80% of screen height
+        self.image_label.setMaximumSize(max_width, max_height)
+
+        # Display the image
+        self.display_image(image)
         
         # Add label to layout
         layout.addWidget(self.image_label)
@@ -72,17 +74,52 @@ class ImageDialog(QDialog):
         
         self.setLayout(layout)
 
+    def display_image(self, image):
+        """Converts and scales the image for display."""
+        # Detect input format (assumes either RGB or BGR)
+        height, width, channels = image.shape
+        bytes_per_line = channels * width
+        if channels == 3:  # RGB or BGR
+            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        elif channels == 4:  # RGBA or BGRA
+            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGBA8888)
+        else:
+            raise ValueError("Unsupported image format: must be RGB, BGR, RGBA, or BGRA.")
+        
+        pixmap = QPixmap.fromImage(q_image)
+
+        # Scale the pixmap to fit within the QLabel's maximum size
+        scaled_pixmap = pixmap.scaled(
+            self.image_label.maximumWidth(),
+            self.image_label.maximumHeight(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled_pixmap)
+
     def save_image(self):
-        # Open file dialog to choose location to save
-        file_name, _ = QFileDialog.getSaveFileName(self, "Save Image", self.file_name, "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)")
+        """Save the image to a file."""
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, "Save Image", self.file_name, "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)"
+        )
         if file_name:
-            # Save the image to the specified file path
-            # Convert to PIL Image
-            pil_image = Image.fromarray(self.image).convert("RGBA")
-            # Save the image using Pillow
-            pil_image.save(file_name)
-            # cv2.imwrite(file_name, cv2.cvtColor(self.image, cv2.COLOR_RGBA2BGRA))  # Convert back to BGR for saving
-            print(f"Image saved to {file_name}")
+            try:
+                # Convert OpenCV image to RGB format for Pillow
+                if self.image.shape[2] == 3:  # BGR
+                    save_image = self.image
+                elif self.image.shape[2] == 4:  # BGRA
+                    # save_image = cv2.cvtColor(self.image, cv2.COLOR_BGRA2RGBA)
+                    save_image = self.image
+                else:
+                    raise ValueError("Unsupported image format for saving.")
+                
+                # Convert to Pillow Image and save
+                pil_image = Image.fromarray(save_image)
+                pil_image.save(file_name)
+                print(f"Image saved to {file_name}")
+            except Exception as e:
+                print(f"Error saving image: {e}")
+
 
 class Detect_Worker(QThread):
     progress = Signal(int)  # 自定义信号，用于更新进度条
@@ -248,9 +285,11 @@ class MyWidget(QMainWindow):
     def show_ori(self):
         if self.image is not None:
             self.load_image(self.image)
+    
     def show_order(self):
         if self.image_result is not None:
             self.load_image(self.image_result)
+    
     def show_emotion(self):
         if self.image_emotion is not None:
             self.load_image(self.image_emotion)
@@ -291,6 +330,7 @@ class MyWidget(QMainWindow):
             self.image = Image.open(file_path)
             self.load_image(self.image)
             self.image_result = copy.deepcopy(self.image)
+            self.image_row_name = copy.deepcopy(self.image)
 
             self.set_ui_disabled(True)
             # 设置覆盖光标，指示正在处理
@@ -317,7 +357,7 @@ class MyWidget(QMainWindow):
         
         # Check if image is loaded successfully
         if pixmap.isNull():
-            print(f"Failed to load image: {image_path}")
+            print(f"Failed to load image")
             return
 
         # Create pixmap item and add to scene
@@ -354,10 +394,12 @@ class MyWidget(QMainWindow):
         if self.ui.radioButton_order.isChecked():
             self.load_image(self.image_result)
         self.update_progress(100)
+        self.image_row_name = draw_name(self.image_row_name, row_names)
 
         self.set_ui_disabled(False)  # 重新启用控件
         # QApplication.restoreOverrideCursor()  # 恢复光标
         self.file_process_finished = True
+        self.show_image_dialog(np.array(self.image_row_name), '集体照人名')
     
     def set_ui_disabled(self, disable: bool):
         """禁用或启用界面控件"""

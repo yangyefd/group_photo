@@ -197,7 +197,6 @@ def draw_face_emoji(img_draw, face, emoji_dict):
     return img_draw
 
 
-
 def draw_faces_emoji(image, faces, emoji_dict):
     draw = np.array(image)
     for face in faces:
@@ -271,7 +270,7 @@ def get_rows(faces):
 
 def draw_name(img, row_names):
     line_space = 40
-    bottom_shift = 120
+    bottom_shift = line_space*(len(row_names) + 1)
     # 使用中文字体
     font = ImageFont.truetype("Microsoft YaHei UI Bold.ttf", 30, encoding="unic")
     draw = ImageDraw.Draw(img)
